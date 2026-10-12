@@ -1,0 +1,81 @@
+name: Build Windows MSVC Portable
+
+on:
+  push:
+    branches:
+      - develop
+    paths:
+      - ".github/workflows/windows-portable.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-msvc-portable:
+    name: "Build and package (Windows-MSVC-Portable)"
+    runs-on: windows-2022
+    env:
+      ARTIFACT_NAME: Windows-MSVC
+      BUILD_PLATFORM: unofficial
+      BUILD_TYPE: Release
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Enter VS Developer shell
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: amd64
+          vsversion: 2022
+
+      - name: Setup Java
+        uses: actions/setup-java@v6
+        with:
+          distribution: zulu
+          java-version: "17"
+
+      - name: Set up vcpkg environment
+        run: |
+          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          aqtversion: "==3.1.*"
+          version: "6.10.2"
+          modules: qtimageformats qtnetworkauth
+          cache: false
+
+      - name: Configure
+        run: |
+          cmake --preset windows_msvc -D VCPKG_HOST_TRIPLET=x64-windows -D VCPKG_TARGET_TRIPLET=x64-windows
+
+      - name: Build
+        run: |
+          cmake --build --preset windows_msvc --config $env:BUILD_TYPE --parallel
+
+      - name: Short version
+        id: short-version
+        run: |
+          $v = git rev-parse --short HEAD
+          echo "version=$v" | Out-File -Append -Encoding utf8 $env:GITHUB_OUTPUT
+
+      - name: Package portable
+        run: |
+          cmake --install build --config $env:BUILD_TYPE
+          Copy-Item -Force -Recurse install install-portable
+          cmake --install build --config $env:BUILD_TYPE --prefix install-portable --component portable
+
+      - name: Upload portable artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: PrismLauncher-Windows-MSVC-Portable-${{ steps.short-version.outputs.version }}-Release
+          path: install-portable/**
+          if-no-files-found: error
